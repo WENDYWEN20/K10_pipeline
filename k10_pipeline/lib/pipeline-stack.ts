@@ -25,23 +25,17 @@ export class PipelineStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // ── 1. Source ──────────────────────────────────────────────────────────────
-    // This MUST be the monorepo that contains ALL THREE folders:
-    //   k10_backend/   (Dockerfile — built by CDK during synth)
-    //   k10_frontend/  (React app — built by the DeployFrontend ShellStep)
-    //   k10_pipeline/  (this CDK app — compiled in the Synth step)
-    //
-    // ❶ Push all three folders to one GitHub repo if you haven't already.
-    // ❷ Create a GitHub connection in AWS Console → Developer Tools → Connections
-    //    and authorise it for that monorepo.
-    // ❸ Replace the two values below.
+    // ── 1. Source ─────────────────────────────────────────────────────────────
+    // Single monorepo: https://github.com/WENDYWEN20/K10_pipeline
+    // Structure inside the repo:
+    //   k10_backend/   ← FastAPI + Dockerfile
+    //   k10_frontend/  ← React/Vite app
+    //   k10_pipeline/  ← this CDK app (package.json here)
     const source = CodePipelineSource.connection(
-      'YOUR_GITHUB_USERNAME/YOUR_MONOREPO_NAME', // e.g. 'emmadoran/k10-report-app'
+      'WENDYWEN20/K10_pipeline',
       'main',
       {
-        // Paste the ARN from AWS Console → Developer Tools → Connections
-        // e.g. 'arn:aws:codestar-connections:us-east-1:123456789012:connection/abcd1234-...'
-        connectionArn: 'arn:aws:codestar-connections:REGION:ACCOUNT_ID:connection/CONNECTION_ID',
+        connectionArn: 'arn:aws:codeconnections:us-east-1:391556258782:connection/3ff263be-f365-4212-b9e5-453eb1ad89cc',
       },
     );
 
@@ -51,8 +45,11 @@ export class PipelineStack extends cdk.Stack {
       // Enable Docker so CDK can build the backend container image during synth.
       dockerEnabledForSynth: true,
 
-      // The synth step compiles the CDK TypeScript app itself.
-      // CodePipeline will run this every time you push to 'main'.
+      // Synth step: cd into k10_pipeline/ (the CDK app subfolder) before running commands.
+      // path.join(__dirname, '../../k10_backend') in backend-stack.ts resolves correctly:
+      //   __dirname  = <checkout>/k10_pipeline/lib
+      //   ../../      = <checkout>/              (monorepo root)
+      //   k10_backend = <checkout>/k10_backend   ✓
       synth: new ShellStep('Synth', {
         input: source,
         commands: [
@@ -89,11 +86,8 @@ export class PipelineStack extends cdk.Stack {
         commands: [
           'cd k10_frontend',
           'npm ci',
-          // VITE_API_BASE_URL is injected from the ALB DNS name above
           'npm run build',
-          // Sync build output to the S3 bucket
           'aws s3 sync dist/ s3://$BUCKET_NAME --delete',
-          // Invalidate CloudFront so users get the latest version immediately
           'aws cloudfront create-invalidation --distribution-id $DISTRIBUTION_ID --paths "/*"',
         ],
       }),
